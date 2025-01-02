@@ -10,6 +10,7 @@ import torch
 import tqdm
 from torch.utils import data
 from torchvision import transforms
+import timm
 
 from nets import nn
 from utils import util
@@ -17,17 +18,23 @@ from utils.dataset import Dataset
 
 warnings.filterwarnings("ignore")
 
-data_dir = os.path.join('..', 'Dataset', 'Metal')
+data_dir = os.path.join(os.getenv("HOME", "/root"), "Datasets", "MVTec", "bottle")
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
 
+# def load_backbone():
+#     backbone = nn.resnet18()
+#     state_dict = torch.load("./weights/resnet18.pth")["state_dict"]
+#     backbone.load_state_dict(state_dict)
+#     for p in backbone.parameters():
+#         p.requires_grad_ = False
+#     return backbone
+
+
 def load_backbone():
-    backbone = nn.resnet18()
-    state_dict = torch.load('./weights/resnet18.pth')['state_dict']
-    backbone.load_state_dict(state_dict)
-    for p in backbone.parameters():
-        p.requires_grad_ = False
-    return backbone
+    model = timm.create_model("resnet18", pretrained=True)
+    model.eval()
+    return model
 
 
 def train(args):
@@ -35,34 +42,40 @@ def train(args):
     util.setup_multi_processes()
     # Model
     model = load_backbone()
-    device = torch.device('cuda:0')
+    device = torch.device("cuda:0")
     filters = 128 * model.fn.expansion + 256 * model.fn.expansion
 
     model = model.to(device)
     model_d = nn.Discriminator(filters, filters).to(device)
     model_g = nn.Generator(args, filters, filters).to(device)
 
-    optimizer_d = torch.optim.Adam(model_d.parameters(), 2E-4, weight_decay=1E-5)
-    optimizer_g = torch.optim.AdamW(model_g.parameters(), 1E-4)
+    optimizer_d = torch.optim.Adam(model_d.parameters(), 2e-4, weight_decay=1e-5)
+    optimizer_g = torch.optim.AdamW(model_g.parameters(), 1e-4)
 
-    dataset = Dataset(os.path.join(data_dir, 'train'),
-                      transforms.Compose([transforms.Resize(size=args.input_size),
-                                          transforms.CenterCrop(args.input_size),
-                                          transforms.RandomHorizontalFlip(),
-                                          transforms.RandomVerticalFlip(),
-                                          transforms.ToTensor(),
-                                          normalize]))
+    dataset = Dataset(
+        os.path.join(data_dir, "train"),
+        transforms.Compose(
+            [
+                transforms.Resize(size=args.input_size),
+                transforms.CenterCrop(args.input_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        ),
+    )
 
-    loader = data.DataLoader(dataset, args.batch_size, True,
-                             num_workers=4, pin_memory=True)
+    loader = data.DataLoader(
+        dataset, args.batch_size, True, num_workers=4, pin_memory=True
+    )
     criterion = util.ComputeLoss(device)
 
-    with open('weights/step.csv', 'w') as f:
+    with open("weights/step.csv", "w") as f:
         best = 0
-        writer = csv.DictWriter(f, fieldnames=['epoch',
-                                               'train_loss',
-                                               'roc_auc', 'auc',
-                                               'f1', 'acc'])
+        writer = csv.DictWriter(
+            f, fieldnames=["epoch", "train_loss", "roc_auc", "auc", "f1", "acc"]
+        )
         writer.writeheader()
         for epoch in range(args.epochs):
             _ = model.eval()
@@ -70,7 +83,7 @@ def train(args):
             model_d.train()
             model_g.train()
 
-            print(('\n' + '%10s' * 5) % ('epoch', 'memory', 'true', 'fake', 'loss'))
+            print(("\n" + "%10s" * 5) % ("epoch", "memory", "true", "fake", "loss"))
             p_bar = tqdm.tqdm(loader, total=len(loader))
             m_loss = util.AverageMeter()
             for samples, _, _ in p_bar:
@@ -92,27 +105,39 @@ def train(args):
                 loss = loss.detach().cpu().item()
 
                 m_loss.update(loss, samples.size(0))
-                gpu = f'{torch.cuda.memory_reserved() / 1E9:.3g}G'  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 3) % (f'{epoch + 1}/{args.epochs}', gpu, true, fake, m_loss.avg)
+                gpu = f"{torch.cuda.memory_reserved() / 1E9:.3g}G"  # (GB)
+                s = ("%10s" * 2 + "%10.4g" * 3) % (
+                    f"{epoch + 1}/{args.epochs}",
+                    gpu,
+                    true,
+                    fake,
+                    m_loss.avg,
+                )
                 p_bar.set_description(s)
 
             save_g = copy.deepcopy(model_g)
             save_d = copy.deepcopy(model_d)
             last = test(args, device, save_g, save_d)
-            writer.writerow({'epoch': str(epoch + 1).zfill(3),
-                             'roc_auc': str(f'{last[0]:.3f}'),
-                             'auc': str(f'{last[1]:.3f}'),
-                             'f1': str(f'{last[2]:.3f}'),
-                             'acc': str(f'{last[3]:.3f}'),
-                             'train_loss': str(f'{m_loss.avg:.5f}')})
+            writer.writerow(
+                {
+                    "epoch": str(epoch + 1).zfill(3),
+                    "roc_auc": str(f"{last[0]:.3f}"),
+                    "auc": str(f"{last[1]:.3f}"),
+                    "f1": str(f"{last[2]:.3f}"),
+                    "acc": str(f"{last[3]:.3f}"),
+                    "train_loss": str(f"{m_loss.avg:.5f}"),
+                }
+            )
             f.flush()
 
-            state = {'model_g': copy.deepcopy(model_g),
-                     'model_d': copy.deepcopy(model_d)}
-            torch.save(state, 'weights/last.pt')
+            state = {
+                "model_g": copy.deepcopy(model_g),
+                "model_d": copy.deepcopy(model_d),
+            }
+            torch.save(state, "weights/last.pt")
             last = util.fitness(numpy.array(last))
             if last > best:
-                torch.save(state, 'weights/best.pt')
+                torch.save(state, "weights/best.pt")
                 best = last
             del state
 
@@ -122,9 +147,9 @@ def train(args):
 @torch.no_grad()
 def test(args, device=None, model_g=None, model_d=None):
     if device is None:
-        device = torch.device('cuda:0')
-        model_g = torch.load('./weights/best.pt', device)['model_g'].float()
-        model_d = torch.load('./weights/best.pt', device)['model_d'].float()
+        device = torch.device("cuda:0")
+        model_g = torch.load("./weights/best.pt", device)["model_g"].float()
+        model_d = torch.load("./weights/best.pt", device)["model_d"].float()
 
         model_g.args = args
 
@@ -135,18 +160,25 @@ def test(args, device=None, model_g=None, model_d=None):
     model_d.eval()
     model.eval()
 
-    dataset = Dataset(os.path.join(data_dir, 'test'),
-                      transforms.Compose([transforms.Resize(size=args.input_size),
-                                          transforms.CenterCrop(args.input_size),
-                                          transforms.ToTensor(),
-                                          normalize]))
+    dataset = Dataset(
+        os.path.join(data_dir, "test"),
+        transforms.Compose(
+            [
+                transforms.Resize(size=args.input_size),
+                transforms.CenterCrop(args.input_size),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        ),
+    )
 
     scores = []
     labels = []
-    loader = data.DataLoader(dataset, args.batch_size // 2,
-                             num_workers=2, pin_memory=True)
+    loader = data.DataLoader(
+        dataset, args.batch_size // 2, num_workers=2, pin_memory=True
+    )
 
-    desc = ('%10s' * 5) % ('', 'f1', 'acc', 'roc_auc', 'auc')
+    desc = ("%10s" * 5) % ("", "f1", "acc", "roc_auc", "auc")
     for samples, targets, filenames in tqdm.tqdm(loader, desc):
         samples = samples.to(torch.float).to(device)
         labels.extend(targets.numpy().tolist())
@@ -186,8 +218,8 @@ def test(args, device=None, model_g=None, model_d=None):
                     image = image * 255
                     mask = mask * 255
                     _, mask = cv2.threshold(mask, 225, 255, cv2.THRESH_BINARY)
-                    cv2.imwrite(f'./weights/{filename[:-4]}_mask.png', mask)
-                    cv2.imwrite(f'./weights/{filename}', image)
+                    cv2.imwrite(f"./weights/{filename[:-4]}_mask.png", mask)
+                    cv2.imwrite(f"./weights/{filename}", image)
 
             scores.extend(list(image_scores))
     scores = numpy.squeeze(numpy.array(scores))
@@ -195,22 +227,22 @@ def test(args, device=None, model_g=None, model_d=None):
     max_scores = numpy.max(scores, -1)
     scores = (scores - min_scores) / (max_scores - min_scores)
     roc_auc, auc, f1, accuracy = util.compute_metrics(scores, labels)
-    print(("%10s" + '%10.3g' * 4) % ("", f1, accuracy, roc_auc, auc))
+    print(("%10s" + "%10.3g" * 4) % ("", f1, accuracy, roc_auc, auc))
     return roc_auc, auc, f1, accuracy
 
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('--input-size', default=288, type=int)
-    parser.add_argument('--batch-size', default=16, type=int)
-    parser.add_argument('--epochs', default=150, type=int)
-    parser.add_argument('--train', action='store_true')
-    parser.add_argument('--test', action='store_true')
+    parser.add_argument("--input-size", default=288, type=int)
+    parser.add_argument("--batch-size", default=16, type=int)
+    parser.add_argument("--epochs", default=150, type=int)
+    parser.add_argument("--train", action="store_true")
+    parser.add_argument("--test", action="store_true")
 
     args = parser.parse_args()
 
-    if not os.path.exists('weights'):
-        os.makedirs('weights')
+    if not os.path.exists("weights"):
+        os.makedirs("weights")
 
     if args.train:
         train(args)
