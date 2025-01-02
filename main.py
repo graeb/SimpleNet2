@@ -181,7 +181,10 @@ def test(args, device=None, model_g=None, model_d=None):
     desc = ("%10s" * 5) % ("", "f1", "acc", "roc_auc", "auc")
     for samples, targets, filenames in tqdm.tqdm(loader, desc):
         samples = samples.to(torch.float).to(device)
-        labels.extend(targets.numpy().tolist())
+        target_normalized = [
+            target if target == 0 else 1 for target in targets.numpy().tolist()
+        ]
+        labels.extend(target_normalized)
 
         shape = samples.shape[0]
         with torch.no_grad():
