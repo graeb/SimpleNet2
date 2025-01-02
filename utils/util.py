@@ -52,7 +52,7 @@ def fitness(x):
 
 
 def compute_metrics(outputs, targets):
-    roc_auc = metrics.roc_auc_score(y_true=targets, y_score=outputs)
+    roc_auc = metrics.roc_auc_score(y_true=targets, y_score=outputs, multi_class="ovo")
 
     precision, recall, _ = metrics.precision_recall_curve(targets, outputs)
     auc = metrics.auc(recall, precision)
