@@ -22,19 +22,19 @@ data_dir = os.path.join(os.getenv("HOME", "/root"), "Datasets", "MVTec", "bottle
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
 
-# def load_backbone():
-#     backbone = nn.resnet18()
-#     state_dict = torch.load("./weights/resnet18.pth")["state_dict"]
-#     backbone.load_state_dict(state_dict)
-#     for p in backbone.parameters():
-#         p.requires_grad_ = False
-#     return backbone
-
-
 def load_backbone():
-    model = timm.create_model("resnet18", pretrained=True)
-    model.eval()
-    return model
+    backbone = nn.resnet18()
+    state_dict = torch.load("/app/weights/resnet18.pth")["state_dict"]
+    backbone.load_state_dict(state_dict)
+    for p in backbone.parameters():
+        p.requires_grad_ = False
+    return backbone
+
+
+# def load_backbone():
+#     model = timm.create_model("resnet18", pretrained=True)
+#     model.eval()
+#     return model
 
 
 def train(args):
