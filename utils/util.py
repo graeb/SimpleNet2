@@ -30,19 +30,19 @@ def setup_multi_processes():
     from platform import system
 
     # set multiprocess start method as `fork` to speed up the training
-    if system() != 'Windows':
-        torch.multiprocessing.set_start_method('fork', force=True)
+    if system() != "Windows":
+        torch.multiprocessing.set_start_method("fork", force=True)
 
     # disable opencv multithreading to avoid system being overloaded
     cv2.setNumThreads(0)
 
     # setup OMP threads
-    if 'OMP_NUM_THREADS' not in environ:
-        environ['OMP_NUM_THREADS'] = '1'
+    if "OMP_NUM_THREADS" not in environ:
+        environ["OMP_NUM_THREADS"] = "1"
 
     # setup MKL threads
-    if 'MKL_NUM_THREADS' not in environ:
-        environ['MKL_NUM_THREADS'] = '1'
+    if "MKL_NUM_THREADS" not in environ:
+        environ["MKL_NUM_THREADS"] = "1"
 
 
 def fitness(x):
@@ -52,12 +52,12 @@ def fitness(x):
 
 
 def compute_metrics(outputs, targets):
-    roc_auc = metrics.roc_auc_score(targets, outputs)
+    roc_auc = metrics.roc_auc_score(y_true=targets, y_score=outputs)
 
     precision, recall, _ = metrics.precision_recall_curve(targets, outputs)
     auc = metrics.auc(recall, precision)
-    f1 = metrics.f1_score(targets, (outputs > 0.1).astype('int32'))
-    accuracy = metrics.accuracy_score(targets, (outputs > 0.1).astype('int32'))
+    f1 = metrics.f1_score(targets, (outputs > 0.1).astype("int32"))
+    accuracy = metrics.accuracy_score(targets, (outputs > 0.1).astype("int32"))
 
     return roc_auc, auc, f1, accuracy
 
@@ -68,9 +68,12 @@ def score_to_mask(args, scores, device):
             scores = torch.from_numpy(scores)
         scores = scores.to(device)
         scores = scores.unsqueeze(1)
-        scores = functional.interpolate(scores,
-                                        size=(args.input_size, args.input_size),
-                                        mode="bilinear", align_corners=False)
+        scores = functional.interpolate(
+            scores,
+            size=(args.input_size, args.input_size),
+            mode="bilinear",
+            align_corners=False,
+        )
         scores = scores.squeeze(1).cpu().numpy()
 
     return [scipy.ndimage.gaussian_filter(score, sigma=4) for score in scores]
@@ -111,15 +114,15 @@ class RandomAugment:
             hsv = numpy.random.uniform(-1, 1, 3) * [0.4, 0.4, 0.4] + 1
             h, s, v = cv2.split(cv2.cvtColor(image, cv2.COLOR_RGB2HSV))
 
-            lut_h = ((x * hsv[0]) % 180).astype('uint8')
-            lut_s = numpy.clip(x * hsv[1], 0, 255).astype('uint8')
-            lut_v = numpy.clip(x * hsv[2], 0, 255).astype('uint8')
+            lut_h = ((x * hsv[0]) % 180).astype("uint8")
+            lut_s = numpy.clip(x * hsv[1], 0, 255).astype("uint8")
+            lut_v = numpy.clip(x * hsv[2], 0, 255).astype("uint8")
 
             h = cv2.LUT(h, lut_h)
             s = cv2.LUT(s, lut_s)
             v = cv2.LUT(v, lut_v)
 
-            image_hsv = cv2.merge((h, s, v)).astype('uint8')
+            image_hsv = cv2.merge((h, s, v)).astype("uint8")
             cv2.cvtColor(image_hsv, cv2.COLOR_HSV2RGB, dst=image)
             h, w = image.shape[:2]
             # Center
@@ -138,18 +141,28 @@ class RandomAugment:
 
             # Shear
             shear = numpy.eye(3)
-            shear[0, 1] = math.tan(random.uniform(-self.shear[0], self.shear[1]) * math.pi / 180)
-            shear[1, 0] = math.tan(random.uniform(-self.shear[0], self.shear[1]) * math.pi / 180)
+            shear[0, 1] = math.tan(
+                random.uniform(-self.shear[0], self.shear[1]) * math.pi / 180
+            )
+            shear[1, 0] = math.tan(
+                random.uniform(-self.shear[0], self.shear[1]) * math.pi / 180
+            )
 
             # Translation
             translation = numpy.eye(3)
-            translation[0, 2] = random.uniform(0.5 - self.translate[0], 0.5 + self.translate[1]) * w
-            translation[1, 2] = random.uniform(0.5 - self.translate[0], 0.5 + self.translate[1]) * h
+            translation[0, 2] = (
+                random.uniform(0.5 - self.translate[0], 0.5 + self.translate[1]) * w
+            )
+            translation[1, 2] = (
+                random.uniform(0.5 - self.translate[0], 0.5 + self.translate[1]) * h
+            )
 
             # Combined rotation matrix, order of operations (right to left) is IMPORTANT
             matrix = translation @ shear @ rotation @ perspective @ center
 
-            image = cv2.warpAffine(image, matrix[:2], dsize=(w, h), flags=resample())  # affine
+            image = cv2.warpAffine(
+                image, matrix[:2], dsize=(w, h), flags=resample()
+            )  # affine
             image = Image.fromarray(image)
         return image
 
@@ -177,13 +190,15 @@ class ComputeLoss:
 
         indices = torch.randint(0, 1, torch.Size([true_feats.shape[0]]))
         one_hot = functional.one_hot(indices, num_classes=1)  # (N, K)
-        noise = torch.stack([torch.normal(0, 0.015, true_feats.shape)], dim=1)  # (N, K, C)
+        noise = torch.stack(
+            [torch.normal(0, 0.015, true_feats.shape)], dim=1
+        )  # (N, K, C)
         noise = (noise.to(self.device) * one_hot.to(self.device).unsqueeze(-1)).sum(1)
         fake_feats = true_feats + noise
 
         scores = model_d(torch.cat([true_feats, fake_feats]))
-        true_scores = scores[:len(true_feats)]
-        fake_scores = scores[len(fake_feats):]
+        true_scores = scores[: len(true_feats)]
+        fake_scores = scores[len(fake_feats) :]
 
         th = 0.5
         p_true = (true_scores.detach() >= th).sum() / len(true_scores)
